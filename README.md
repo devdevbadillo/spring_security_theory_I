@@ -9,7 +9,7 @@
     - [Integridad](#integridad)
     - [Disponibilidad](#disponibilidad)
   - [Vulnerabilidades comunes (OWASP Top 10)](#owasp-top-10)
-    - [Inyección (SQL Injection, Command Injection)](#injection)
+    - [Inyección (Ej. SQL Injection)](#injection)
     - [Broken authentication](#broken-autentication)
     - [Sensitive data exposure](#sensitive-data-exposure)
     - [Broken access control](#broken-access-control)
@@ -20,9 +20,30 @@
     - [Cifrado simétrico y asímetrico](#cifrado-simetrico-y-asimetrico)
   - [Hashing](#hashing)
     - [MD5](#md5)
-    - [BCrypt](#bcrypt)
     - [SHA-256](#sha-256)
-
+    - [BCrypt](#bcrypt)
+- [Fundamentos de Spring Security](#fundamentos-de-spring-security)
+    - [Arquitectura de Spring Security](#arquitectura-de-spring-security)
+    - [FilterChainProxy y la cadena de filtros (Servlet Filters)](#filterchain-proxy-y-servlet-filters)
+      - [BasicAuthenticationFilter](#basic-authentication-filter)
+      - [UsernamePasswordAuthenticationFilter](#username-password-authentication-filter)
+      - [Otros filtros comúnes](#otros-filtros)
+      - [Orden de los filtros](#orden-de-los-filtros)
+    - [SecurityContextHolder](#security-context-holder)
+      - [Contexto por ThreadLocal](#contexto-por-thread-local)
+      - [Contexto por HttpSession](#contexto-por-http-session)
+    - [Las interfaces Authentication y GrantedAuthority](#interfaz-authenticacion-y-granted-authority)
+    - [La interfaz UserDetailsService y la clase UserDetails](#userdetails-service)
+      - [Implementación y configuración](#implementacion-de-userdatails)
+    - [AuthenticationManager y AuthenticationProvider](#auhtentication-manager-y-provider)
+      - [DaoAuthenticationProvider](#dao-authentication-provider)
+      - [Múltiples proveedores de autenticación](#multiples-proveedores-de-authenticacion)
+    - [AccessDecisionManager y AccessDecisionVoter](#access-decision-manager-y-decision-voter)
+      - [Estrategias de votación](#estrategias-de-votacion)
+        - [AffirmativeBased](#affirmative-based)
+        - [ConsensusBased](#consensus-based)
+        - [UnanimousBased](#unanimous-based)
+          
 <a id="fundamentos-de-seguridad-en-aplicaciones"></a>
 ## Fundamentos de seguridad en aplicaciones web 
 La seguridad en aplicaciones web se refiere a las medidas y prácticas implementadas para proteger las aplicaciones basadas en la web de amenazas que puedan comprometer su funcionamiento, la confidencialidad de los datos, la integridad de la información y la disponibilidad de los servicios.
@@ -248,18 +269,202 @@ Esto es especialmente peligroso en lenguajes que permiten la deserialización de
 
 <a id="criptografia-basica"></a>
 ### Criptografía básica
+La criptografía se ha utilizado principalmente para la confidencialidad, transformando el texto plano (legible) en texto cifrado (ilegible) y viceversa. Sin embargo, en la era digital, su alcance se ha expandido enormemente para abordar una gama más amplia de desafíos de seguridad.
+
+> Conceptos clave en criptografía
+
+- `Texto Plano (Plaintext)`: La información original o mensaje legible antes de ser cifrado.
+- `Texto Cifrado (Ciphertext)`: El mensaje transformado e ilegible después de la aplicación de un algoritmo de cifrado.
+- `Cifrado (Encryption)`: El proceso de convertir texto plano en texto cifrado utilizando un algoritmo y una clave.
+- `Descifrado (Decryption)`: El proceso de convertir texto cifrado de nuevo en texto plano utilizando un algoritmo y una clave.
+- `Algoritmo Criptográfico (Cipher)`: Una función matemática utilizada para cifrar y descifrar datos.
+- `Clave Criptográfica (Key)`: Un valor secreto utilizado por el algoritmo para realizar el cifrado y descifrado. La seguridad de un sistema criptográfico a menudo depende de la secrecía y la longitud de la clave, no de la secrecía del algoritmo (Principio de Kerckhoffs)
 
 <a id="cifrado-simetrico-y-asimetrico"></a>
 #### Cifrado simétrico y asímetrico
 
+> Cifrado simétrico
+En el cifrado simétrico, **la misma clave se utiliza tanto para cifrar como para descifrar la información**. Esta clave debe ser secreta y compartida de forma segura entre el emisor y el receptor.
+
+- ¿Cómo funciona?
+
+* `Emisor`: Toma el texto plano, aplica un algoritmo de cifrado simétrico y la clave secreta compartida para producir el texto cifrado.
+* `Receptor`: Recibe el texto cifrado, aplica el mismo algoritmo de descifrado y la misma clave secreta compartida para recuperar el texto plano.
+
+> [!NOTE]
+> - `AES (Advanced Encryption Standard)`: Es el estándar de cifrado simétrico en la actualidad. Opera con tamaños de clave de 128, 192 o 256 bits y es considerado muy seguro. Ampliamente utilizado en cifrado de discos (BitLocker, FileVault) y comunicaciones seguras (TLS/SSL).
+>
+> - Uno de los usos de cifrado simétrico dentro de las aplicaciones web es el cifrar datos en reposo (ej. en bases de datos).
+
+> Cifrado asimétrico
+
+En el cifrado asimétrico, se utiliza un par de claves matemáticamente relacionadas: una clave pública y una clave privada. Lo que se cifra con una clave solo puede descifrarse con la otra clave del par
+
+- ¿Cómo funciona?
+
+1. Para Confidencialidad (Envío Seguro de Mensajes):
+  * `Receptor`: Genera un par de claves: una clave pública (que puede compartir libremente con cualquiera) y una clave privada (que mantiene secreta).
+  * `Emisor`: Quiere enviar un mensaje confidencial al receptor. Utiliza la clave pública del receptor para cifrar el mensaje.
+  * `Receptor`: Recibe el texto cifrado y utiliza su propia clave privada (y solo su clave privada) para descifrarlo.
+
+Un atacante que intercepte el texto cifrado y tenga la clave pública no podrá descifrar el mensaje porque necesita la clave privada.
+
+2 Para Autenticación y No Repudio (Firmas Digitales):
+  * `Emisor`: Quiere probar su identidad y asegurar que el mensaje no ha sido alterado. Utiliza su propia clave privada para "firmar" digitalmente el mensaje (o un hash del mensaje).
+  * `Receptor`: Recibe el mensaje y la firma digital. Utiliza la clave pública del emisor para verificar la firma. Si la verificación es exitosa, se confirma que el mensaje fue enviado por el emisor (autenticación) y que no ha sido alterado desde que fue firmado (integridad y no repudio).
+
+> [!NOTE]
+> 
+> * `RSA (Rivest–Shamir–Adleman)`: El algoritmo de cifrado asimétrico más conocido y ampliamente utilizado para el intercambio de claves, firmas digitales y cifrado de pequeños bloques de datos. Se basa en la dificultad de factorizar números primos grandes.
+
+Uso en aplicaciones web:
+- TLS/SSL (HTTPS): Se utiliza cifrado asimétrico al inicio para establecer una conexión segura (intercambio de claves, autenticación del servidor mediante certificados digitales) y luego se negocia una clave simétrica para cifrar el resto de la comunicación, aprovechando la velocidad del cifrado simétrico.
+- Firmas digitales: Para verificar la autenticidad de software, documentos, etc.
+  
 <a id="Hashing"></a>
 ### Hashing
+El hashing (o función hash criptográfica) es un proceso que toma un dato de entrada (o 'mensaje') de cualquier tamaño y produce una cadena de caracteres alfanuméricos de tamaño fijo, conocida como valor hash, código hash, digest del mensaje o simplemente hash.
+
+A diferencia del cifrado, el hashing es una función unidireccional; no hay forma práctica de "deshacer" un hash para recuperar el dato original. Es decir, no hay un proceso de "deshashing".
+
+> Propiedades de una función Hash Criptográfica
+
+1. `Unidireccionalidad (Pre-image Resistance)`: Es computacionalmente inviable reconstruir el mensaje original a partir de su hash.
+2. `Determinista`: La misma entrada siempre debe producir el mismo hash.
+3. `Resistencia a colisiones (Collision Resistance)`: Es computacionalmente inviable encontrar dos mensajes diferentes que produzcan el mismo hash
+
+> Proposito
+
+1. `Almacenamiento Seguro de Contraseñas`: En lugar de almacenar contraseñas en texto plano (lo cual es un riesgo enorme), se almacena el hash de las contraseñas. Cuando un usuario intenta iniciar sesión, la contraseña que introduce se hashea y se compara con el hash almacenado. Si coinciden, la contraseña es correcta.
+2. `Verificación de Integridad de Datos `: Almacenar el hash de un archivo. Si el archivo es modificado, su nuevo hash no coincidirá con el original, indicando una alteración. Se utiliza para verificar la integridad de descargas de software o comunicaciones.
 
 <a id="md5"></a>
 #### MD5
+MD5 es un algoritmo de hashing criptográfico que produce un valor hash de 128 bits (16 bytes), típicamente representado como un número hexadecimal de 32 caracteres. Fue ampliamente utilizado en el pasado para verificar la integridad de archivos (ej. descargas de software) y para el almacenamiento de contraseñas. Sin embargo, a principios de la década de 2000, se descubrieron debilidades significativas en su resistencia a colisiones
 
-<a id="bcrypt"></a>
-#### BCrypt
+> Problemas de seguridad
+
+1. `Colisiones`: La principal debilidad. Si dos archivos pueden tener el mismo hash MD5, un atacante podría crear un archivo malicioso con el mismo hash que uno legítimo, lo que comprometería la verificación de integridad. 
+2. No apto para contraseñas: Debido a su velocidad y la posibilidad de colisiones, MD5 es extremadamente inadecuado para el almacenamiento de contraseñas.
+  * `Ataques de diccionario y fuerza bruta`: La velocidad de cálculo de MD5 permite a los atacantes probar millones de contraseñas por segundo.
+  * `Rainbow Tables`: Tablas precalculadas de hashes para contraseñas comunes, lo que permite "invertir" hashes de forma rápida.
+
 
 <a id="sha-256"></a>
 #### SHA-256
+SHA-256 es parte de la familia de algoritmos SHA-2 (Secure Hash Algorithm 2), produce un valor hash de 256 bits (32 bytes), típicamente representado como un número hexadecimal de 64 caracteres.
+
+> Propiedades y seguridad
+
+1. `Resistencia a colisiones`: Hasta la fecha (2025), no se han encontrado ataques prácticos de colisión contra SHA-256. Se considera criptográficamente seguro para este propósito.
+2. `Unidireccionalidad`: Es computacionalmente inviable revertir un hash SHA-256 para encontrar la entrada original.
+3. `Efecto avalancha`: Un cambio mínimo en la entrada produce un hash completamente diferente.
+
+> Usos comunes
+
+1. `Certificados digitales TLS/SSL`: Los certificados que aseguran HTTPS utilizan SHA-256 (u otros SHA-2) para firmar los certificados.
+2. `Blockchain y criptomonedas`: SHA-256 es el algoritmo de hashing central utilizado en Bitcoin para la "prueba de trabajo" (Proof of Work) y para crear direcciones de monedero.
+
+<a id="bcrypt"></a>
+#### BCrypt
+BCrypt es una *función de hashing de contraseñas basada en el algoritmo de cifrado Blowfish**. Fue diseñada por Niels Provos y David Mazières en 1999 específicamente para el almacenamiento de contraseñas, abordando las deficiencias de los algoritmos de hashing de propósito general (como MD5 o SHA-256) para esta tarea
+
+- ¿Por qué BCrypt es mejor para contraseñas que MD5 o SHA-256?
+1. "Salting" Integrado: Un salt **es una cadena aleatoria y única** que se añade a la contraseña antes de hashearla. BCrypt genera automáticamente un salt único para cada contraseña. Este salt se almacena junto con el hash.
+2. "Key Stretching" (Factor de Costo/Iteraciones): BCrypt está diseñado para ser lento de propósito. Permite configurar un "factor de costo" (o "rounds" o "iteraciones"). Este factor determina cuántas veces se aplica el algoritmo internamente
+
+Con estos dos factores, Bcrypt permite que se mantenga seguro a lo largo del tiempo sin cambiar el algoritmo.
+
+
+- ¿Cómo funciona BCrypt para contraseñas?
+
+> 1. Cuando un usuario establece una contraseña:
+>
+> - El sistema genera un salt aleatorio y único.
+> - Toma la contraseña del usuario y el salt.
+> - Aplica el algoritmo BCrypt con un factor de costo predefinido (ej. 10-12 iteraciones).
+> - Almacena el hash resultante, que incluye el salt y el factor de costo incrustados en su formato.
+
+> 2. Cuando un usuario intenta iniciar sesión:
+>
+> - El sistema recupera el hash almacenado para ese usuario, que contiene el salt y el factor de costo usados.
+> - Toma la contraseña introducida por el usuario y el salt recuperado.
+> - Aplica el algoritmo BCrypt con el factor de costo incrustado.
+> - Compara el nuevo hash generado con el hash almacenado. Si coinciden, la contraseña es correcta.
+
+> [!IMPORTANT]
+
+> Un hash BCrypt típico se ve así: `$2a$10$abcdefghijklmnopqrstuvwx.Yz01234567890123456789012`
+> 
+> - $2a (o $2b, $2y): Identifica la versión del algoritmo BCrypt.
+> - $10: Es el factor de costo (2^10 = 1024 iteraciones). Este valor es ajustable.
+> - $abcdefghijklmnopqrstuvwx.: Es el salt generado aleatoriamente.
+> - Yz01234567890123456789012: Es el hash final de la contraseña.
+
+<a id="fundamentos-de-spring-security"></a>
+## Fundamentos de Spring Security
+
+<a id="arquitectura-de-spring-security"></a>
+### Arquitectura de Spring Security
+
+<a id="filterchain-proxy-y-servlet-filters"></a>
+### FilterChainProxy y la cadena de filtros (Servlet Filters)
+
+<a id="basic-authentication-filter"></a>
+#### BasicAuthenticationFilter
+
+<a id="username-password-authentication-filter"></a>
+#### UsernamePasswordAuthenticationFilter
+
+<a id="otros-filtros"></a>
+#### Otros filtros comúnes
+
+<a id="orden-de-los-filtros"></a>
+#### Orden de los filtros
+
+<a id="security-context-holder"></a>
+### SecurityContextHolder
+
+<a id="contexto-por-thread-local"></a>
+#### Contexto por ThreadLocal
+
+<a id="contexto-por-http-session"></a>
+#### Contexto por HttpSession
+
+<a id="interfaz-authenticacion-y-granted-authority"></a>
+### Las interfaces Authentication y GrantedAuthority
+
+<a id="userdetails-service"></a>
+### La interfaz UserDetailsService y la clase UserDetails
+
+<a id="implementacion-de-userdatails"></a>
+#### Implementación y configuración
+
+<a id="auhtentication-manager-y-provider"></a>
+### AuthenticationManager y AuthenticationProvider
+
+<a id="dao-authentication-provider"></a>
+#### DaoAuthenticationProvider
+
+<a id="multiples-proveedores-de-authenticacion"></a>
+#### Múltiples proveedores de autenticación
+
+<a id="access-decision-manager-y-decision-voter"></a>
+### AccessDecisionManager y AccessDecisionVoter
+
+<a id="estrategias-de-votacion"></a>
+#### Estrategias de votación
+
+<a id="affirmative-based"></a>
+##### AffirmativeBased
+
+<a id="consensus-based"></a>
+##### ConsensusBased
+
+<a id="unanimous-based"></a>
+##### UnanimousBased
+
+
+
+
+
