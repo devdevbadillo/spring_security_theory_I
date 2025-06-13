@@ -367,7 +367,7 @@ SHA-256 es parte de la familia de algoritmos SHA-2 (Secure Hash Algorithm 2), pr
 
 <a id="bcrypt"></a>
 #### BCrypt
-BCrypt es una *función de hashing de contraseñas basada en el algoritmo de cifrado Blowfish**. Fue diseñada por Niels Provos y David Mazières en 1999 específicamente para el almacenamiento de contraseñas, abordando las deficiencias de los algoritmos de hashing de propósito general (como MD5 o SHA-256) para esta tarea
+BCrypt es una **función de hashing de contraseñas basada en el algoritmo de cifrado Blowfish**. Fue diseñada por Niels Provos y David Mazières en 1999 específicamente para el almacenamiento de contraseñas, abordando las deficiencias de los algoritmos de hashing de propósito general (como MD5 o SHA-256) para esta tarea
 
 - ¿Por qué BCrypt es mejor para contraseñas que MD5 o SHA-256?
 1. "Salting" Integrado: Un salt **es una cadena aleatoria y única** que se añade a la contraseña antes de hashearla. BCrypt genera automáticamente un salt único para cada contraseña. Este salt se almacena junto con el hash.
@@ -375,25 +375,23 @@ BCrypt es una *función de hashing de contraseñas basada en el algoritmo de cif
 
 Con estos dos factores, Bcrypt permite que se mantenga seguro a lo largo del tiempo sin cambiar el algoritmo.
 
-
 - ¿Cómo funciona BCrypt para contraseñas?
 
-> 1. Cuando un usuario establece una contraseña:
->
+1. Cuando un usuario establece una contraseña:
+
 > - El sistema genera un salt aleatorio y único.
 > - Toma la contraseña del usuario y el salt.
 > - Aplica el algoritmo BCrypt con un factor de costo predefinido (ej. 10-12 iteraciones).
 > - Almacena el hash resultante, que incluye el salt y el factor de costo incrustados en su formato.
 
-> 2. Cuando un usuario intenta iniciar sesión:
->
+2. Cuando un usuario intenta iniciar sesión:
+
 > - El sistema recupera el hash almacenado para ese usuario, que contiene el salt y el factor de costo usados.
 > - Toma la contraseña introducida por el usuario y el salt recuperado.
 > - Aplica el algoritmo BCrypt con el factor de costo incrustado.
 > - Compara el nuevo hash generado con el hash almacenado. Si coinciden, la contraseña es correcta.
 
 > [!IMPORTANT]
-
 > Un hash BCrypt típico se ve así: `$2a$10$abcdefghijklmnopqrstuvwx.Yz01234567890123456789012`
 > 
 > - $2a (o $2b, $2y): Identifica la versión del algoritmo BCrypt.
@@ -403,27 +401,121 @@ Con estos dos factores, Bcrypt permite que se mantenga seguro a lo largo del tie
 
 <a id="fundamentos-de-spring-security"></a>
 ## Fundamentos de Spring Security
+El objetivo principal de Spring Security es proteger la aplicación contra accesos no autorizados, garantizando que solo los usuarios correctos puedan acceder a los recursos adecuados.
+Una de las grandes ventajas de Spring Security es su extensibilidad. Está diseñado para ser modular y permitirle al desarrollador el reemplazar o añadir componentes según las necesidades del negocio, desde la forma en que los usuarios se autentican hasta cómo se definen y aplican los permisos.
 
 <a id="arquitectura-de-spring-security"></a>
 ### Arquitectura de Spring Security
+La arquitectura de Spring Security se basa en el concepto de filtros de Servlet y un conjunto de interfaces y clases que trabajan en conjunto para proporcionar seguridad. El corazón de esta arquitectura es el *FilterChainProxy*, que actúa como el punto de entrada principal para todas las solicitudes de seguridad.
+
+![image](https://github.com/user-attachments/assets/4c14c7c0-10b2-4b2a-be04-a6f0a1435622)
+
+> Componentes clave de la arquitectura
+
+- `SecurityContextHolder`: Un mecanismo para **almacenar los detalles del usuario actualmente autenticado** (el Authentication object). Por defecto, **utiliza un ThreadLocal para que el contexto de seguridad esté disponible para cualquier parte de la aplicación** dentro del mismo hilo de ejecución.
+  
+- `Authentication`: Una interfaz que representa los detalles de un usuario autenticado. Contiene el principal (el usuario en sí, a menudo un objeto UserDetails), las credentials (la contraseña o token) y las authorities (los roles o permisos del usuario).
+  
+- `AuthenticationManager`: La interfaz principal para la autenticación. **Es responsable de recibir un Authentication object (a menudo incompleto, solo con credenciales) e intentar autenticarlo**, devolviendo un Authentication completamente poblado si la autenticación es exitosa.
+  
+- `AuthenticationProvider`: Implementaciones de AuthenticationManager que saben cómo autenticar tipos específicos de Authentication. Por ejemplo, un DaoAuthenticationProvider autentica usuarios contra un UserDetailsService.
+  
+- `UserDetailsService`: Una interfaz utilizada para **cargar información específica del usuario** (nombre de usuario, contraseña codificada, roles) por un nombre de usuario. Es crucial para integrar fuentes de usuarios personalizadas (bases de datos, LDAP, etc.).
+  
+- `AccessDecisionManager`: La interfaz principal para la autorización. **Decide si un usuario tiene permiso para acceder a un recurso protegido**, basándose en el Authentication del usuario y los atributos de configuración del recurso.
+  
+- `AccessDecisionVoter`: **Implementaciones de AccessDecisionManager** que votan si se debe otorgar o denegar el acceso. Un AccessDecisionManager puede usar múltiples AccessDecisionVoter para tomar una decisión final.
+  
+- `GrantedAuthority`: Una interfaz que **representa una autoridad (un permiso o rol)** otorgada a un Authentication principal.
 
 <a id="filterchain-proxy-y-servlet-filters"></a>
 ### FilterChainProxy y la cadena de filtros (Servlet Filters)
 
+Spring Security construye su magia **sobre la API de Servlet Filters de Java EE**. En pocas palabras, un Servlet Filter es un objeto que **puede interceptar solicitudes antes de que lleguen al servlet de destino** y también interceptar respuestas antes de que sean enviadas al cliente.
+
+El componente central aquí es el `FilterChainProxy`. Este es un Servlet Filter especial de Spring Security que **actúa como el orquestador principal**. Cuando una solicitud HTTP llega a tu aplicación web:
+
+1. La solicitud es interceptada por el FilterChainProxy.
+2. El FilterChainProxy **no realiza la lógica de seguridad directamente**, sino que **delega la responsabilidad** a una cadena de filtros de Spring Security (también conocidos como `Security Filters`).
+3. Determina qué cadena de filtros específicos debe aplicarse a la solicitud actual basándose en la URL de la solicitud y su verbo HTTP.
+4. Luego, itera a través de los filtros en esa cadena, **invocando a cada uno de ellos en un orden predefinido**. Cada filtro en la cadena realiza una tarea de seguridad específica (como autenticación básica, autenticación de formularios, manejo de sesiones, etc.).
+5. Si un filtro decide que la solicitud no está autorizada o autenticada, puede detener la ejecución de la cadena y redirigir al usuario o lanzar una excepción de seguridad.
+6. Si todos los filtros permiten que la solicitud continúe, eventualmente llegará al servlet de destino (por ejemplo, un controlador de Spring MVC).
+
+
 <a id="basic-authentication-filter"></a>
 #### BasicAuthenticationFilter
+Es uno de los filtros de autenticación más simples y comunes en Spring Security, utilizado para implementar la autenticación HTTP Basic.
+
+> ¿Cómo funciona?
+
+1. Cuando una solicitud llega al servidor, el BasicAuthenticationFilter **inspecciona el encabezado Authorization de la solicitud HTTP**.
+2. Si el encabezado Authorization está presente y su valor comienza con "Basic ", el filtro **intenta extraer el nombre de usuario y la contraseña codificados en Base64**.
+3. Estos datos se utilizan para **crear un objeto UsernamePasswordAuthenticationToken** (un tipo de `Authentication`).
+4. Este token se pasa al `AuthenticationManager` configurado para su autenticación.
+5. Si el AuthenticationManager autentica exitosamente el token, el filtro establece el `Authentication` autenticado en el `SecurityContextHolder` y la solicitud continúa.
+6. Si la autenticación falla, el filtro puede enviar una respuesta `HTTP 401 Unauthorized` al cliente, a menudo con un encabezado `WWW-Authenticate` para indicar que se requiere autenticación.
 
 <a id="username-password-authentication-filter"></a>
 #### UsernamePasswordAuthenticationFilter
+Es el filtro por defecto y más utilizado para la autenticación basada en **formularios** en Spring Security.
+
+> ¿Cómo funciona?
+
+1. Este filtro se configura para "escuchar" en una URL de inicio de sesión específica **(por defecto, /login)**.
+2. Cuando una solicitud POST llega a esta URL (normalmente desde un formulario HTML de inicio de sesión), el UsernamePasswordAuthenticationFilter extrae el nombre de usuario y la contraseña de los parámetros de la solicitud.
+3. Al igual que con BasicAuthenticationFilter, utiliza estos datos para crear un UsernamePasswordAuthenticationToken.
+4. Este token se pasa al `AuthenticationManager` para su procesamiento.
+5. Si la autenticación es exitosa, el filtro:
+  * Almacena el objeto `Authentication` autenticado en el `SecurityContextHolder`.
+  * Invoca a un `AuthenticationSuccessHandler` (por defecto, una redirección a la URL de éxito configurada, a menudo /).
+6. Si la autenticación falla:
+  * Invoca a un `AuthenticationFailureHandler` (por defecto, una redirección de vuelta a la página de inicio de sesión con un mensaje de error).
 
 <a id="otros-filtros"></a>
 #### Otros filtros comúnes
 
+- `LogoutFilter`: Gestiona el cierre de sesión de un usuario. Invalida la sesión, **limpia el SecurityContextHolder** y redirige a una URL de cierre de sesión exitoso.
+
+- `ExceptionTranslationFilter`: Captura excepciones relacionadas con la seguridad `(AuthenticationException y AccessDeniedException)` lanzadas por filtros posteriores en la cadena y **las traduce en respuestas HTTP apropiadas** (por ejemplo, redireccionar a la página de inicio de sesión o a una página de acceso denegado).
+
+- `SessionManagementFilter`: Gestiona la sesión del usuario, incluyendo la prevención de ataques de fijación de sesión, la concurrencia de sesiones (cuántas sesiones puede tener un usuario simultáneamente) y la expiración de sesiones.
+
+- `RememberMeFilter`: Permite que los usuarios permanezcan autenticados entre sesiones de navegador sin tener que volver a iniciar sesión. **Utiliza cookies persistentes para almacenar un token de "recordarme"**.
+
+- `CsrfFilter`: Protege contra ataques de falsificación de solicitudes entre sitios (CSRF) al verificar un token CSRF en cada solicitud POST.
+
+- `AnonymousAuthenticationFilter`: Si un usuario no ha sido autenticado explícitamente, este filtro **asigna un Authentication "anónimo" al SecurityContextHolder**. Esto es útil para permitir que **recursos públicos sean accesibles por "usuarios" no autenticados**, mientras se les sigue aplicando la lógica de autorización.
+
+- `FilterSecurityInterceptor`: Este es el último filtro en la cadena de seguridad y es el responsable de la autorización. Intercepta la solicitud justo antes de que llegue al controlador y decide si el usuario autenticado tiene permiso para acceder al recurso basándose en las reglas de autorización configuradas (por ejemplo, @PreAuthorize, hasRole()).
+  
 <a id="orden-de-los-filtros"></a>
 #### Orden de los filtros
+El orden de los filtros en la cadena de FilterChainProxy es absolutamente crucial. Cada filtro tiene un propósito específico y depende del trabajo realizado por filtros anteriores. Un orden incorrecto puede llevar a fallas de seguridad o comportamientos inesperados.
+
+1. Filtros de manejo de `seguridad de bajo nivel/excepciones`: Estos filtros suelen estar al principio para manejar problemas generales o excepciones.
+- `CsrfFilter` (protege contra CSRF)
+- `LogoutFilter` (maneja el cierre de sesión)
+- `ExceptionTranslationFilter` (maneja excepciones de seguridad)
+
+2. `Filtros de autenticación`: Estos son los que intentan establecer la identidad del usuario.
+- `BasicAuthenticationFilter`
+- `UsernamePasswordAuthenticationFilter`
+- `RememberMeFilter`
+- `AnonymousAuthenticationFilter`
+
+3. `Filtros de sesión y gestión`
+- SessionManagementFilter
+
+4. `Filtros de autorización `: Estos son los últimos, ya que requieren que el usuario esté autenticado para tomar decisiones de autorización.
+- `FilterSecurityInterceptor`
+
+> [!IMPORTANT]
+> La presencia de cada filtro depende de las características de seguridad que se hayan habilitado en la aplicación (por ejemplo, si no se usa "recordarme", el **RememberMeFilter no estará activo**).
 
 <a id="security-context-holder"></a>
 ### SecurityContextHolder
+El SecurityContextHolder es, sin lugar a dudas, uno de los componentes más cruciales y fundamentales en Spring Security. Su propósito principal es **almacenar los detalles del principal (usuario) que está actualmente autenticado e interactuando con la aplicación**. En otras palabras, es el lugar donde Spring Security **guarda "quién eres" para el hilo de ejecución actual**.
 
 <a id="contexto-por-thread-local"></a>
 #### Contexto por ThreadLocal
