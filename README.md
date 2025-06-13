@@ -164,15 +164,87 @@ Consecuencias:
 
 <a id="broken-access-control"></a>
 #### Broken access control
+La vulnerabilidad de Broken Access Control (Control de Acceso Defectuoso) **ocurre cuando las restricciones sobre lo que los usuarios autenticados pueden hacer no se aplican correctamente**. Esto permite a los atacantes **eludir la autorización y acceder a funcionalidades o datos a los que no deberían tener acceso**, como cuentas de otros usuarios, archivos sensibles, o funcionalidades administrativas.
 
+> Ejemplos de fallas
+
+1. `Omisión de controles de acceso`: La aplicación no verifica si el usuario está autorizado para acceder a una URL o recurso específico. Por ejemplo, un usuario cambia user_id=123 en una URL por user_id=456 para ver los datos de otro usuario.
+2. `Elevación de privilegios horizontal`: Un usuario puede acceder a recursos de otro usuario del mismo nivel de privilegio.
+3. `Elevación de privilegios vertical`: Un usuario puede acceder a recursos o funciones de un usuario con un nivel de privilegio superior (ej. un usuario normal accede a funciones de administrador).
+4. `Configuración incorrecta de CORS (Cross-Origin Resource Sharing)`: Permitir solicitudes de orígenes no confiables, lo que puede permitir que sitios maliciosos realicen solicitudes autorizadas en nombre del usuario.
+
+Consecuencias:
+
+* `Acceso no autorizado a datos`: Lectura, modificación o eliminación de datos de otros usuarios o datos sensibles del sistema.
+* `Manipulación de la lógica de negocio`: Realizar acciones que solo deberían ser permitidas para ciertos roles.
+  
 <a id="cross-site-scripting"></a>
 #### Cross-Site scripting (XSS)
+Es una vulnerabilidad de inyección que **permite a los atacantes ejecutar scripts maliciosos (generalmente JavaScript) en el navegador de un usuario legítimo**. 
+
+> Tipos de XSS
+
+1. `XSS Reflejado (Reflected XSS)`: El payload malicioso se "refleja" directamente desde la entrada del usuario en la respuesta HTTP de la aplicación web. El atacante debe engañar al usuario para que haga clic en un enlace malicioso que contenga el script.
+
+- Ejemplo: Un sitio de búsqueda vulnerable que refleja la entrada del usuario. Si un atacante envía un enlace como ```https://sitio.com/buscar?q=<script>alert('XSS');</script>```, y el sitio simplemente imprime ```Estás buscando: <script>alert('XSS');</script>```, el navegador del usuario ejecutará el script.
+
+2. `XSS Almacenado/Persistente (Stored XSS)`: El payload malicioso se almacena de forma persistente en el servidor de la aplicación (ej. en una base de datos, en un foro, en un perfil de usuario, en comentarios). *Cada vez que un usuario accede a la página o función donde está almacenado el payload, el script se ejecuta en su navegador**. Este es el tipo más peligroso de XSS.
+   
+- Ejemplo: Un atacante publica un comentario en un blog que contiene un script malicioso. Cada usuario que vea ese comentario ejecutará el script.
+  
+3. `XSS Basado en DOM (DOM-based XSS)`: La vulnerabilidad reside en el código JavaScript del lado del cliente que procesa datos de una fuente no confiable (ej. URL, localStorage) y los escribe directamente en el DOM (Document Object Model) sin escape adecuado. El servidor no está involucrado en la inyección.
+
+
+- Ejemplo: document.getElementById('name').innerHTML = location.hash.substring(1); si el hash contiene un script.
+  
+Consecuencias de XSS:
+
+- `Robo de cookies de sesión`: El atacante puede robar la cookie de sesión del usuario y suplantar su identidad.
+- `Redirección del usuario`: Redirigir al usuario a sitios de phishing.
+- `Defacing de la we`b: Modificar el contenido de la página web que el usuario ve.
+- `Ejecución de acciones en nombre del usuario`: Realizar acciones (cambiar contraseñas, enviar mensajes) en nombre del usuario sin su conocimiento.
+- `Keylogging`: Registrar las pulsaciones de teclas del usuario.
+
 
 <a id="cross-site-reques-forgery"></a>
 #### Cross-Site request forgery (XSRF)
+Es un ataque que **engaña a un navegador web para que envíe una solicitud HTTP no deseada a una aplicación web en la que el usuario ya está autenticado**. Si un usuario está autenticado en un sitio (ej. un banco en línea) y visita un sitio malicioso diseñado por un atacante, el sitio malicioso puede forzar al navegador del usuario a enviar una solicitud (ej. transferir dinero, cambiar contraseña) al sitio legítimo. El sitio legítimo **ve la solicitud como válida porque viene del navegador del usuario autenticado y contiene sus cookies de sesión**.
+
+En otras palabras, explota la confianza del sitio web en el navegador del usuario y la forma en que los navegadores envían automáticamente las cookies.
+
+> ¿Cómo funciona?
+
+1. `Sesión activa`: Un usuario inicia sesión en bancolegitimo.com y tiene una sesión activa (cookie de sesión).
+2. `Visita sitio malicioso`: El usuario, en otra pestaña o ventana, visita un sitio malicioso (ej. sitio-malicioso.com).
+3. `Solicitud forjada`: El sitio malicioso contiene código (ej. una etiqueta <img> oculta, un formulario con auto-envío) que envía una solicitud HTTP a bancolegitimo.com en nombre del usuario.
+  * Ejemplo de imagen oculta: ```<img src="https://bancolegitimo.com/transferencia?monto=1000&destino=atacante" style="display:none;">```
+  * Ejemplo de formulario auto-enviado:    
+```
+<form action="https://bancolegitimo.com/cambiar_email" method="POST" id="csrfForm">
+    <input type="hidden" name="email" value="email_del_atacante@malicious.com">
+    <input type="hidden" name="password_confirm" value="contraseña_actual_del_usuario_que_no_se">
+</form>
+<script>document.getElementById('csrfForm').submit();</script>
+```
+4. `Ejecución de la solicitud`: El navegador del usuario, al cargar la imagen o enviar el formulario, incluye automáticamente las cookies de sesión de bancolegitimo.com (porque la solicitud va a ese dominio). El banco legítimo recibe la solicitud, la considera válida (ya que proviene de un usuario autenticado) y la ejecuta.
+
+Consecuencias:
+
+- Transferencias de dinero/transacciones no autorizadas.
+- Manipulación de configuraciones de la cuenta.
+- Cualquier acción que el usuario autenticado pueda realizar.
 
 <a id="insecure-deserialization"></a>
 #### Insecure deserialization
+La deserialización es el proceso de convertir un flujo de bytes (un objeto serializado) en un objeto de datos en la memoria. Si un atacante puede manipular estos datos serializados, puede inyectar código o alterar la lógica de la aplicación cuando el objeto es deserializado.
+
+Esto es especialmente peligroso en lenguajes que permiten la deserialización de objetos complejos (ej. Java, PHP, Python, Ruby, .NET) donde los objetos deserializados pueden contener métodos mágicos o callbacks que se ejecutan automáticamente durante la deserialización.
+
+> Ejemplos de ataques
+
+1. `Ejecución de código remoto (RCE)`: El atacante inyecta una clase o cadena que, al deserializarse, invoca funciones del sistema operativo o clases que permiten la ejecución de código.
+2. `Denegación de servicio`: Deserializar una carga útil especialmente grande o recursiva puede agotar los recursos del sistema.
+3. `Inyección de objetos`: Crear o modificar objetos en la aplicación que alteren su comportamiento de forma maliciosa.
 
 <a id="criptografia-basica"></a>
 ### Criptografía básica
