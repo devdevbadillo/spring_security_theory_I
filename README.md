@@ -33,7 +33,7 @@
       - [Contexto por ThreadLocal](#contexto-por-thread-local)
       - [Contexto por HttpSession](#contexto-por-http-session)
     - [Las interfaces Authentication y GrantedAuthority](#interfaz-authenticacion-y-granted-authority)
-    - [La interfaz UserDetailsService y la clase UserDetails](#userdetails-service)
+    - [La interfaz UserDetailsService y UserDetails](#userdetails-service)
       - [Implementación y configuración](#implementacion-de-userdatails)
     - [AuthenticationManager y AuthenticationProvider](#auhtentication-manager-y-provider)
       - [DaoAuthenticationProvider](#dao-authentication-provider)
@@ -515,48 +515,308 @@ El orden de los filtros en la cadena de FilterChainProxy es absolutamente crucia
 
 <a id="security-context-holder"></a>
 ### SecurityContextHolder
-El SecurityContextHolder es, sin lugar a dudas, uno de los componentes más cruciales y fundamentales en Spring Security. Su propósito principal es **almacenar los detalles del principal (usuario) que está actualmente autenticado e interactuando con la aplicación**. En otras palabras, es el lugar donde Spring Security **guarda "quién eres" para el hilo de ejecución actual**.
+
+El propósito principal del SecurityContextHolder es **almacenar los detalles del principal (usuario) que está actualmente autenticado e interactuando con la aplicación**. En otras palabras, es el lugar donde Spring Security **guarda "quién eres" para el hilo de ejecución actual**.
+
+Por ejemplo, si se necesita saber el nombre de usuario actual en la capa de servicio para registrar quién realizó una acción, simplemente se puede acceder a ```SecurityContextHolder.getContext().getAuthentication().getName()```.
 
 <a id="contexto-por-thread-local"></a>
 #### Contexto por ThreadLocal
+El mecanismo por defecto y más común para almacenar el SecurityContext en el SecurityContextHolder es a través de un ThreadLocal.
+
+¿Qué es un ThreadLocal?
+
+Un ThreadLocal es una clase en Java que proporciona un **almacenamiento de datos que es local para cada hilo de ejecución**. Esto significa que cada hilo tiene su propia copia de la variable ThreadLocal, y los cambios realizados por un hilo en su copia no afectan las copias de otros hilos.
+
+> ¿Cómo aplica a Spring Security?
+
+1. Cuando una solicitud HTTP llega a la aplicación, **un nuevo hilo de ejecución es típicamente asignado para manejar esa solicitud**.
+2. Los filtros de Spring Security (como UsernamePasswordAuthenticationFilter o BasicAuthenticationFilter) realizan la autenticación.
+3. Una vez que un usuario es autenticado exitosamente, Spring Security crea un objeto Authentication completamente poblado.
+4. Este **objeto Authentication se envuelve en un SecurityContext y se almacena en el SecurityContextHolder** utilizando un ThreadLocal para el hilo actual.
+5. Mientras ese hilo maneja la solicitud, **cualquier parte del código dentro de ese hilo puede acceder a SecurityContextHolder.getContext()** para obtener los detalles de autenticación.
+6. Cuando la solicitud termina y el hilo se "libera", **el SecurityContext se limpia automáticamente del ThreadLocal** para evitar fugas de memoria y garantizar que el contexto de seguridad no persista para solicitudes futuras manejadas por el mismo hilo (lo cual es crucial en entornos de servidores de aplicaciones donde los hilos son reutilizados).
 
 <a id="contexto-por-http-session"></a>
 #### Contexto por HttpSession
+Aunque el almacenamiento principal es por ThreadLocal para la duración de la solicitud, **el SecurityContext también se guarda automáticamente en la HttpSession** de Java EE.
+
+> ¿Por qué es necesario guardar el contexto en la sesión HTTP?
+
+**Las solicitudes HTTP son, por naturaleza, "sin estado" (stateless)**. Esto significa que el servidor no recuerda nada sobre las solicitudes anteriores de un cliente a menos que se implemente un mecanismo para mantener el estado.
 
 <a id="interfaz-authenticacion-y-granted-authority"></a>
 ### Las interfaces Authentication y GrantedAuthority
+Estas dos interfaces son el corazón de cómo Spring Security representa la identidad y los permisos de un usuario.
+
+> La interfaz Authentication
+
+Es la representación principal de un principal (usuario) autenticado (o intentando autenticarse) en Spring Security. **Contiene toda la información necesaria sobre el usuario y sus credenciales**.
+
+- Los métodos clave de la interfaz Authentication incluyen:
+
+1. `Object getPrincipal()`: Representa el usuario que ha iniciado sesión. **A menudo es un objeto UserDetails** (que veremos a continuación) o un String con el nombre de usuario.
+2. `Object getCredentials()`: Representa las credenciales del usuario (por ejemplo, la contraseña). **Por razones de seguridad, es común que las credenciales se borren (se pongan a null)** después de que la autenticación sea exitosa para evitar que la información sensible persista en la memoria.
+3. `Collection<? extends GrantedAuthority>` getAuthorities(): Una colección de los permisos o roles que el usuario tiene.
+4. `boolean isAuthenticated()`: Indica si el principal ha sido autenticado. Una vez que la autenticación es exitosa, este valor es true.
+5. `Object getDetails()`: Proporciona detalles adicionales sobre la autenticación (por ejemplo, la dirección IP del cliente, el identificador de la sesión).
+
+> [!IMPORTANT]
+> Cuando un usuario inicia sesión, el `AuthenticationManager` devuelve una implementación de Authentication que contiene todos estos detalles. **Esta Authentication es la que se almacena en el SecurityContextHolder**.
+
+
+> La interfaz GrantedAuthority
+
+**Representa una autoridad (un permiso o rol) que ha sido concedida a un principal (usuario) autenticado**.
+
+- El único método clave es:
+
+1. `String getAuthority()`: Devuelve el nombre de la autoridad (por ejemplo, "ROLE_ADMIN", "READ_PRIVILEGE", "DELETE_PRODUCT")
+
+> Puntos importantes sobre GrantedAuthority:
+>
+> - `Roles vs. Permisos`: Aunque se usan indistintamente, es común que las GrantedAuthority representen tanto roles (**agrupaciones de permisos** como "ADMIN", "USER") como permisos individuales (acciones específicas como "CREATE_PRODUCT", "VIEW_REPORT"). 
+> 
+> - `Prefijo "ROLE_"`: Por convención, las autoridades que representan roles suelen llevar el prefijo ROLE_. Por ejemplo, si tienes un rol "ADMIN", el GrantedAuthority sería `new SimpleGrantedAuthority("ROLE_ADMIN")`. Esto es especialmente importante cuando se usan expresiones de seguridad como hasRole('ADMIN'), ya que **Spring Security automáticamente añade el prefijo "ROLE_" si no está presente en la expresión**. Si tu GrantedAuthority no tiene el prefijo ROLE_, entonces debes usar hasAuthority('ADMIN') en tus expresiones.
+> 
+> - `Inmutabilidad`: Las implementaciones de GrantedAuthority suelen ser inmutables, ya que representan permisos fijos. La implementación más común es `SimpleGrantedAuthority`.
 
 <a id="userdetails-service"></a>
-### La interfaz UserDetailsService y la clase UserDetails
+### La interfaz UserDetailsService y UserDetails
+
+> Interfaz UserDetailsService
+
+Es una estrategia crucial que **Spring Security utiliza para cargar los detalles de un usuario dado su nombre de usuario**. Es la capa de abstracción entre el framework de seguridad y la fuente real de los datos del usuario (una base de datos, un directorio LDAP, o un servicio REST).
+
+- El único método clave es:
+
+1. `UserDetails loadUserByUsername(String username) throws UsernameNotFoundException`: Este método **es llamado por un AuthenticationProvider (comúnmente DaoAuthenticationProvider) cuando se intenta autenticar a un usuario**. Su responsabilidad es encontrar al usuario por su username y devolver un objeto UserDetails que contenga toda la información necesaria (nombre de usuario, contraseña, estado de la cuenta, autoridades). Si el usuario no se encuentra, debe lanzar una UsernameNotFoundException.
+
+> [!IMPORTANT]
+> Uno mismo tiene que **implementar esta interfaz** para definir cómo la aplicación obtiene la información del usuario de la base de datos o cualquier otro sistema.
+
+> Interfaz UserDetails 
+
+Representa los detalles completos de un usuario principal. Es el objeto que el UserDetailsService devuelve y que **Spring Security utiliza para realizar la autenticación y, posteriormente, la autorización**.
+
+- UserDetails es análogo al Principal de Java EE y encapsula información como:
+
+1. `String getUsername()`: El username del usuario (debe de ser único).
+
+2. `String getPassword()`: La contraseña codificada del usuario. La contraseña aquí debe estar codificada (hashed) utilizando un PasswordEncoder. **Spring Security no almacenará contraseñas en texto plano por razones de seguridad**.
+
+3. `Collection<? extends GrantedAuthority> getAuthorities()`: Una colección de los roles y permisos del usuario (GrantedAuthority).
+
+4. `boolean isAccountNonExpired()`: Indica si la cuenta del usuario no ha caducado.
+
+5. `boolean isAccountNonLocked()`: Indica si la cuenta del usuario no está bloqueada.
+
+6. `boolean isCredentialsNonExpired()`: Indica si las credenciales (contraseña) del usuario no han caducado.
+
+7. `boolean isEnabled()`: Indica si el usuario está habilitado (activo).
+
+> [!NOTE]
+> Spring Security proporciona una implementación por defecto conveniente: `org.springframework.security.core.userdetails.User`
 
 <a id="implementacion-de-userdatails"></a>
 #### Implementación y configuración
 
 <a id="auhtentication-manager-y-provider"></a>
 ### AuthenticationManager y AuthenticationProvider
+En el proceso de autenticación dentro de Spring Security, encontramos dos interfaces clave que trabajan de la mano: AuthenticationManager y AuthenticationProvider. Juntos, orquestan el proceso de verificar la identidad de un usuario.
+
+> AuthenticationManager
+
+El AuthenticationManager **es la interfaz principal para la autenticación en Spring Security**. Su responsabilidad es simple pero crucial: recibir una solicitud de autenticación (representada por un objeto **Authentication**, que inicialmente solo contiene las credenciales del usuario) y, si es exitosa, devolver un objeto **Authentication** completamente poblado que representa un usuario autenticado. **Si la autenticación falla, lanzará una excepción**.
+
+> [!NOTE]
+> El AuthenticationManager delega la tarea real de autenticación. No sabe cómo autenticar a un usuario por sí mismo; en su lugar, delega esta tarea a uno o más `AuthenticationProviders`.
+
+- El método clave es:
+
+1. `Authentication authenticate(Authentication authentication) throws AuthenticationException`: Este método es invocado por los filtros de autenticación (como UsernamePasswordAuthenticationFilter o BasicAuthenticationFilter) cuando necesitan autenticar a un usuario. Recibe un objeto Authentication (por ejemplo, un UsernamePasswordAuthenticationToken con nombre de usuario y contraseña) y, si la autenticación es exitosa, devuelve un Authentication completamente poblado (con principal, credentials limpias y authorities).
+
+> AuthenticationProvider
+
+Los AuthenticationProviders son los "trabajadores" reales que **saben cómo realizar un tipo específico de autenticación*. Cada AuthenticationProvider está diseñado para autenticar un tipo particular de credenciales o de fuente de usuario.
+
+- Los métodos clave de la interfaz AuthenticationProvider son:
+
+1. `Authentication authenticate(Authentication authentication) throws AuthenticationException`: Este es el método donde se implementa la lógica de autenticación real.
+2. `boolean supports(Class<?> authentication)`: Este método es utilizado por el AuthenticationManager para **determinar qué AuthenticationProvider puede manejar un tipo específico de objeto Authentication**. Por ejemplo, un DaoAuthenticationProvider indicará que soporta UsernamePasswordAuthenticationToken.
+
+Cuando un AuthenticationManager recibe una solicitud de autenticación, **itera sobre la lista de AuthenticationProviders configurados**. Para cada AuthenticationProvider, llama a su método supports(). Si un AuthenticationProvider indica que puede manejar el tipo de Authentication dado, entonces el AuthenticationManager invoca su método authenticate() para intentar la autenticacióN.
 
 <a id="dao-authentication-provider"></a>
 #### DaoAuthenticationProvider
+El `DaoAuthenticationProvider` es la implementación más común y utilizada de AuthenticationProvider en aplicaciones que **autentican usuarios contra una base de datos**.
+
+> ¿Cómo funciona?
+
+1. El `DaoAuthenticationProvider` se configura con una instancia de UserDetailsService y un PasswordEncoder.
+
+2. Cuando el DaoAuthenticationProvider recibe un objeto Authentication (**típicamente un UsernamePasswordAuthenticationToken**), extrae el nombre de usuario de este token.
+
+3. Llama al método loadUserByUsername() de su UserDetailsService configurado, pasándole el nombre de usuario. El UserDetailsService es responsable de cargar los detalles del usuario (un objeto UserDetails) de la fuente de datos subyacente.
+
+4. Una vez que obtiene el UserDetails, el DaoAuthenticationProvider compara la contraseña proporcionada en el Authentication original (que el usuario envió) con la contraseña codificada del UserDetails, utilizando el PasswordEncoder configurado.
+
+6. Si las contraseñas coinciden, y la cuenta del usuario (UserDetails) está habilitada, no bloqueada y no expirada, entonces la autenticación es exitosa. El DaoAuthenticationProvider construye y devuelve un nuevo objeto Authentication completamente poblado (con el UserDetails como principal y las GrantedAuthoritys asociadas).
+   
+7. Si la autenticación falla por cualquier motivo (usuario no encontrado, contraseña incorrecta, cuenta bloqueada, etc.), se lanza una AuthenticationException.
 
 <a id="multiples-proveedores-de-authenticacion"></a>
 #### Múltiples proveedores de autenticación
+Spring Security permite configurar múltiples AuthenticationProviders con un único AuthenticationManager. Esto es extremadamente útil en escenarios donde necesitas autenticar usuarios contra diferentes fuentes o usando diferentes mecanismos
+
+> ¿Cómo funciona con múltiples proveedores?
+
+Cuando el AuthenticationManager (específicamente la implementación ProviderManager que Spring Security usa por defecto) recibe un objeto Authentication para autenticar:
+
+1. Itera a través de su lista configurada de AuthenticationProviders.
+2. Para cada AuthenticationProvider, llama a su método supports(Class<?> authentication) para verificar si ese proveedor es capaz de manejar el tipo de Authentication que se está intentando autenticar.
+3. Si un proveedor supports() el tipo de autenticación, el ProviderManager invoca su método authenticate().
+4. Si un proveedor autentica exitosamente la solicitud, el ProviderManager devuelve inmediatamente el Authentication autenticado y detiene la iteración.
+5. Si todos los proveedores que supports() el tipo de autenticación fallan (lanzan una AuthenticationException), o si ningún proveedor supports() el tipo de autenticación, el ProviderManager lanzará su propia AuthenticationException
+
+> Ejemplo
+```
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+
+@Configuration
+@EnableWebSecurity
+public class MultiAuthProviderConfig {
+
+    private final UserDetailsService myUserDetailsService;
+    private final MyLdapUserDetailsService myLdapUserDetailsService; // Asume que tienes otro UserDetailsService para LDAP
+
+    public MultiAuthProviderConfig(UserDetailsService myUserDetailsService, MyLdapUserDetailsService myLdapUserDetailsService) {
+        this.myUserDetailsService = myUserDetailsService;
+        this.myLdapUserDetailsService = myLdapUserDetailsService;
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public AuthenticationProvider daoAuthenticationProvider() {
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
+        provider.setUserDetailsService(myUserDetailsService); // UserDetailsService para usuarios de DB
+        provider.setPasswordEncoder(passwordEncoder());
+        return provider;
+    }
+
+    @Bean
+    public AuthenticationProvider ldapAuthenticationProvider() {
+        // Ejemplo de un AuthenticationProvider para LDAP
+        // Esto sería una implementación real de LdapAuthenticationProvider
+        // Simplificado para el ejemplo
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider(); // Podría ser LdapAuthenticationProvider real
+        provider.setUserDetailsService(myLdapUserDetailsService); // UserDetailsService para usuarios LDAP
+        provider.setPasswordEncoder(passwordEncoder()); // LDAP puede tener su propio codificador o no
+        return provider;
+    }
+
+    // Configurando los AuthenticationProviders directamente en HttpSecurity
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(authorize -> authorize
+                .anyRequest().authenticated()
+            )
+            .formLogin(form -> form.permitAll())
+            .authenticationProvider(daoAuthenticationProvider()) // Primero intenta autenticar con DB
+            .authenticationProvider(ldapAuthenticationProvider()); // Luego intenta autenticar con LDAP
+
+        return http.build();
+    }
+}
+```
+
+En este ejemplo, Spring Security primero intentará autenticar con el daoAuthenticationProvider. Si falla, luego intentará con el ldapAuthenticationProvider.
 
 <a id="access-decision-manager-y-decision-voter"></a>
 ### AccessDecisionManager y AccessDecisionVoter
+Una vez que un usuario ha sido autenticado (es decir, sabemos "quién eres"), el siguiente paso es la autorización (es decir, "¿qué puedes hacer?"). 
+
+Aquí es donde entran en juego el `AccessDecisionManager` y los `AccessDecisionVoters`. Ellos determinan si un principal (usuario) autenticado tiene el derecho de acceder a un recurso protegido o de ejecutar una acción específica.
+
+> AccessDecisionManager
+
+El AccessDecisionManager es la interfaz principal para la toma de decisiones de autorización. Similar al **AuthenticationManager**, no toma las decisiones de autorización por sí mismo. En su lugar, **delega la "votación" a una colección de `AccessDecisionVoters`**.
+
+El método clave es:
+
+1. `void decide(Authentication authentication, Object object, Collection<ConfigAttribute> configAttributes) throws AccessDeniedException`: Este método es invocado por el FilterSecurityInterceptor (el último filtro en la cadena de seguridad).
+
+Recibe:
+- `authentication`: El objeto Authentication del usuario actualmente autenticado.
+- `object`: El objeto de seguridad protegido que el usuario intenta acceder (por ejemplo, la URL de la solicitud, un método que se va a invocar).
+- `configAttributes`: Una colección de atributos de configuración asociados con el objeto protegido (por ejemplo, ROLE_ADMIN, hasRole('USER')). Estos son los requisitos de seguridad que deben cumplirse para acceder al recurso.
+
+Basándose en las "votaciones" de los AccessDecisionVoters, el AccessDecisionManager toma una decisión final:
+* Si el acceso es concedido, el método simplemente regresa y la ejecución continúa.
+* Si el acceso es denegado, lanza una AccessDeniedException.
+
+
+> AccessDecisionVoters
+
+Son implementaciones de la interfaz que "votan" sobre si un principal autenticado debería tener acceso a un recurso protegido. Cada AccessDecisionVoter puede especializarse en evaluar un tipo particular de atributo de configuración o de lógica de autorización.
+
+- Los métodos clave son:
+  
+1. `int vote(Authentication authentication, Object object, Collection<ConfigAttribute> configAttributes)`: Este es el método central donde el votante emite su voto.
+
+Puede devolver uno de tres valores:
+
+* `ACCESS_GRANTED (1)`: El votante concede el acceso.
+* `ACCESS_DENIED (-1)`: El votante deniega el acceso.
+* `ACCESS_ABSTAIN (0)`: El votante no puede tomar una decisión (por ejemplo, no entiende los configAttributes dados o no tiene suficiente información)
+
+2. `boolean supports(ConfigAttribute attribute)`: Indica si este votante es capaz de procesar un tipo específico de ConfigAttribute
 
 <a id="estrategias-de-votacion"></a>
 #### Estrategias de votación
+La forma en que el `AccessDecisionManager` interpreta los votos de los `AccessDecisionVoters` se conoce como estrategia de votación. Spring Security proporciona varias implementaciones de AccessDecisionManager, cada una con una estrategia de votación diferente.
 
 <a id="affirmative-based"></a>
 ##### AffirmativeBased
+Esta es la estrategia por defecto. **Si al menos un AccessDecisionVoter concede ACCESS_GRANTED, el acceso es inmediatamente concedido**, independientemente de los votos ACCESS_DENIED de otros votantes. **Si ningún votante concede el acceso, y al menos uno deniega (ACCESS_DENIED), entonces el acceso es denegado**. Si todos los votantes se abstienen (ACCESS_ABSTAIN), el acceso es denegado por defecto.
+
+> Ejemplo
+>
+> * Si un recurso requiere ROLE_ADMIN o ROLE_EDITOR, y el usuario tiene ROLE_ADMIN, se concederá el acceso incluso si un votante niega el acceso por no tener ROLE_EDITOR.
 
 <a id="consensus-based"></a>
 ##### ConsensusBased
+El AccessDecisionManager cuenta los votos ACCESS_GRANTED y ACCESS_DENIED. **Si el número de votos ACCESS_GRANTED es mayor que el número de votos ACCESS_DENIED, el acceso es concedido**. Si los votos ACCESS_DENIED son mayores, el acceso es denegado. 
+
+Si hay un empate, o todos se abstienen, la decisión se basa en la configuración de `allowIfEqualGrantedDeniedDecisions` y `allowIfAllAbstainDecisions`.
+
+> [!NOTE]
+> Útil cuando se desea que múltiples factores contribuyan a la decisión de acceso, y una simple mayoría determina el resultado.
+>
+> - Ejemplo: Un recurso requiere tanto ROLE_USER como IP_WHITELISTED. Un votante concede por ROLE_USER, otro votante deniega por IP_NOT_WHITELISTED. Si hay más votos de denegación, el acceso es denegado.
+
 
 <a id="unanimous-based"></a>
 ##### UnanimousBased
 
+Para que el acceso sea concedido, **todos los AccessDecisionVoters que no se abstengan (ACCESS_ABSTAIN) deben votar ACCESS_GRANTED**. Si un solo votante emite un voto ACCESS_DENIED, el acceso es denegado. Si todos los votantes se abstienen, el acceso es denegado por defecto.
 
-
-
+> [!NOTE]
+> Útil cuando la seguridad es extremadamente estricta y se requiere que absolutamente todas las condiciones de seguridad se cumplan para conceder acceso
+> 
+> - Ejemplo: Un recurso requiere ambos ROLE_DEVELOPER y que el acceso sea desde una VPN_CORPORATIVA. Si un votante verifica el rol y lo concede, pero otro votante verifica la VPN y la deniega, el acceso general será denegado.
 
