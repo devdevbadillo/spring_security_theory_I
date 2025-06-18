@@ -1,4 +1,4 @@
-# Spring Security
+# Spring Security l
 
 ## Tabla de Contenido
 
@@ -43,7 +43,28 @@
         - [AffirmativeBased](#affirmative-based)
         - [ConsensusBased](#consensus-based)
         - [UnanimousBased](#unanimous-based)
-          
+- [Configuración de Spring Security](#configuracion-de-spring-security)
+    - [Configuración basada en Java](#configuracion-basada-en-java)
+      - [La anotación @EnableWebSecurity](#la-anotacion-enable-web-security)
+    - [Configuración para autorización](#configuracion-para-autorizacion)
+      - [Autorización basada en URL](#autorizacion-basada-en-url)
+        - [Los métodos .antMatchers(), .mvcMatchers(), .requestMatchers()](#los-metodos-para-autorizacion-por-url)
+      - [Expresiones de seguridad](#expresiones-de-seguridad)
+        - [Las expresiones hasRole(), hasAuthority(), isAuthenticated(), isAnonymous(), isFullyAuthenticated(), permitAll(), denyAll()](#expresiones-de-seguridad-para-autorizacion)
+      - [Autorización basada en métodos](#autorizacion-basada-en-metodos)
+        - [Las anotaciones @PreAuthorize, @PostAuthorize, @Secured, @RolesAllowed](#anotaciones-para-autorizacion)
+    - [CSRF Protection (Cross-Site Request Forgery)](#crsf-protection)
+        - [Implementación por defecto](#implementacion-contra-crsf-por-defecto)
+        - [Manejo en APIs REST](#manejo-de-crsf-en-apis)
+    - [Session Management](#session-management)
+      - [Estrategias de creación de sesión](#creacion-de-sesiones)
+        - [Las estrategias always, if_required, never, stateless](#estrategias-para-la-creacion-de-sesiones)
+      - [Control de concurrencia de sesiones](#concurrencia-de-sesiones)
+      - [Invalidación de sesiones](#invalidacion-de-sesiones)
+      - [Protección contra fijación de sesión](#proteccion-contra-fijacion-de-sesion)
+    - [CORS (Cross-Origin Resource Sharing)](#cors)
+      - [Configuración dentro de Spring Security](#configuracion-de-cors)
+
 <a id="fundamentos-de-seguridad-en-aplicaciones"></a>
 ## Fundamentos de seguridad en aplicaciones web 
 La seguridad en aplicaciones web se refiere a las medidas y prácticas implementadas para proteger las aplicaciones basadas en la web de amenazas que puedan comprometer su funcionamiento, la confidencialidad de los datos, la integridad de la información y la disponibilidad de los servicios.
@@ -545,9 +566,6 @@ Aunque el almacenamiento principal es por ThreadLocal para la duración de la so
 
 **Las solicitudes HTTP son, por naturaleza, "sin estado" (stateless)**. Esto significa que el servidor no recuerda nada sobre las solicitudes anteriores de un cliente a menos que se implemente un mecanismo para mantener el estado.
 
-   
-2. Segunda solicitud - envío del Formulario de inicio de sesión
-   
 <a id="interfaz-authenticacion-y-granted-authority"></a>
 ### Las interfaces Authentication y GrantedAuthority
 Estas dos interfaces son el corazón de cómo Spring Security representa la identidad y los permisos de un usuario.
@@ -920,4 +938,72 @@ Para que el acceso sea concedido, **todos los AccessDecisionVoters que no se abs
 > Útil cuando la seguridad es extremadamente estricta y se requiere que absolutamente todas las condiciones de seguridad se cumplan para conceder acceso
 > 
 > - Ejemplo: Un recurso requiere ambos ROLE_DEVELOPER y que el acceso sea desde una VPN_CORPORATIVA. Si un votante verifica el rol y lo concede, pero otro votante verifica la VPN y la deniega, el acceso general será denegado.
+
+
+<a id="configuracion-de-spring-security"></a>
+## Configuración de Spring Security
+
+<a id="configuracion-basada-en-java"></a>
+### Configuración basada en Java
+
+<a id="la-anotacion-enable-web-security"></a>
+#### La anotación @EnableWebSecurity
+
+<a id="configuracion-para-autorizacion"></a>
+### Configuración para autorización
+
+<a id="autorizacion-basada-en-url"></a>
+#### Autorización basada en URL
+
+<a id="los-metodos-para-autorizacion-por-url"></a>
+##### Los métodos .antMatchers(), .mvcMatchers(), .requestMatchers()
+
+<a id="expresiones-de-seguridad"></a>
+#### Expresiones de seguridad
+
+<a id="expresiones-de-seguridad-para-autorizacion"></a>
+##### Las expresiones hasRole(), hasAuthority(), isAuthenticated(), isAnonymous(), isFullyAuthenticated(), permitAll(), denyAll()
+
+<a id="autorizacion-basada-en-metodos"></a>
+#### Autorización basada en métodos
+
+<a id="anotaciones-para-autorizacion"></a>
+##### Las anotaciones @PreAuthorize, @PostAuthorize, @Secured, @RolesAllowed
+
+<a id="crsf-protection"></a>
+### CSRF Protection (Cross-Site Request Forgery)
+
+<a id="implementacion-contra-crsf-por-defecto"></a>
+#### Implementación por defecto
+
+<a id="manejo-de-crsf-en-apis"></a>
+#### Manejo en APIs REST
+
+<a id="session-management"></a>
+### Session Management
+
+<a id="creacion-de-sesiones"></a>
+#### Estrategias de creación de sesión
+
+<a id="estrategias-para-la-creacion-de-sesiones"></a>
+##### Las estrategias always, if_required, never, stateless
+
+<a id="concurrencia-de-sesiones"></a>
+#### Control de concurrencia de sesiones
+
+<a id="invalidacion-de-sesiones"></a>
+#### Invalidación de sesiones
+
+<a id="proteccion-contra-fijacion-de-sesion"></a>
+#### Protección contra fijación de sesión
+
+<a id="cors"></a>
+### CORS (Cross-Origin Resource Sharing)
+
+<a id="configuracion-de-cors"></a>
+#### Configuración dentro de Spring Security
+
+
+
+
 
