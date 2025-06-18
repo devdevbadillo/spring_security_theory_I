@@ -433,7 +433,7 @@ La arquitectura de Spring Security se basa en el concepto de filtros de Servlet 
 
 Spring Security construye su magia **sobre la API de Servlet Filters de Java EE**. En pocas palabras, un Servlet Filter es un objeto que **puede interceptar solicitudes antes de que lleguen al servlet de destino** y también interceptar respuestas antes de que sean enviadas al cliente.
 
-El componente central aquí es el `FilterChainProxy`. Este es un Servlet Filter especial de Spring Security que **actúa como el orquestador principal**. Cuando una solicitud HTTP llega a tu aplicación web:
+El componente central aquí es el `FilterChainProxy`. Este es un Servlet Filter especial de Spring Security que **actúa como el orquestador principal**. Cuando una solicitud HTTP llega a la aplicación web:
 
 1. La solicitud es interceptada por el FilterChainProxy.
 2. El FilterChainProxy **no realiza la lógica de seguridad directamente**, sino que **delega la responsabilidad** a una cadena de filtros de Spring Security (también conocidos como `Security Filters`).
@@ -545,6 +545,9 @@ Aunque el almacenamiento principal es por ThreadLocal para la duración de la so
 
 **Las solicitudes HTTP son, por naturaleza, "sin estado" (stateless)**. Esto significa que el servidor no recuerda nada sobre las solicitudes anteriores de un cliente a menos que se implemente un mecanismo para mantener el estado.
 
+   
+2. Segunda solicitud - envío del Formulario de inicio de sesión
+   
 <a id="interfaz-authenticacion-y-granted-authority"></a>
 ### Las interfaces Authentication y GrantedAuthority
 Estas dos interfaces son el corazón de cómo Spring Security representa la identidad y los permisos de un usuario.
@@ -620,6 +623,104 @@ Representa los detalles completos de un usuario principal. Es el objeto que el U
 
 <a id="implementacion-de-userdatails"></a>
 #### Implementación y configuración
+
+```
+@AllArgsConstructor
+@Service
+public class UserDetailsServiceImpl implements UserDetailsService{
+    private final CredentialRepository credentialRepository;
+
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        Credential credential = this.findUser(username);
+            List<SimpleGrantedAuthority> autorityList = List.of(
+                            new SimpleGrantedAuthority("ROLE_USER")
+                    );
+          
+          return new User(
+                  credential.getEmail(),
+                  credential.getPassword(),
+                  autorityList
+            );
+    }
+
+
+    private Credential findUser(String email) throws UsernameNotFoundException {
+        Credential credential = this.credentialRepository.getCredentialByEmail(email);
+
+        if (credential == null) 
+            throw new UsernameNotFoundException(CredentialConstants.USERNAME_OR_PASSWORD_INCORRECT);
+        
+        return credential;
+    }
+    
+}
+```
+
+* Método importante:
+  
+1. `UserDetails loadUserByUsername(String username)`: Este es el método central y Spring Security lo llamará automáticamente cuando necesite los detalles de un usuario basándose en su nombre de usuario (en esté caso, el email).
+
+- List<SimpleGrantedAuthority> autorityList = List.of(new SimpleGrantedAuthority("ROLE_USER"));: Aquí se definen los roles o permisos del usuario. En este ejemplo simplificado, a cada usuario se le asigna el rol ROLE_USER.
+
+-  return new User(...): Finalmente, se crea y devuelve una instancia de `org.springframework.security.core.userdetails.User`. Esta es una implementación por defecto de la interfaz UserDetails de Spring Security. Se le pasan tres argumentos clave:
+  1. El nombre de usuario (email de la credencial).
+  2. La contraseña codificada de la credencial.
+  3. La lista de autoridades (roles/permisos) del usuario.
+
+```
+@AllArgsConstructor
+@Service
+public class AuthServiceImpl implements IAuthService{
+
+    private final UserDetailsServiceImpl userDetailsServiceImpl;    
+    private final PasswordEncoder passwordEncoder;
+    private final JwtUtil jwtUtil;
+
+    @Override
+    public MessageResponse signIn(SignInRequest signInRequest) throws BadCredentialsException {
+        Authentication authentication = this.authenticate(signInRequest.getEmail(), signInRequest.getPassword());
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        String accessToken = jwtUtil.generateToken(authentication);
+        return new MessageResponse(accessToken);
+    }
+
+    public Authentication authenticate(String username, String password) throws BadCredentialsException {
+        UserDetails userDetails = this.userDetailsServiceImpl.loadUserByUsername(username);
+        if (!passwordEncoder.matches(password, userDetails.getPassword()))
+            throw new BadCredentialsException(CredentialConstants.USERNAME_OR_PASSWORD_INCORRECT);
+
+        return new UsernamePasswordAuthenticationToken(username, userDetails.getPassword(), userDetails.getAuthorities());
+    }
+
+}
+```
+
+En resumen, el flujo de autenticación es el siguiente:
+
+1. Un usuario intenta iniciar sesión proporcionando un email y una contraseña hacía el `AuthServiceImpl`.
+
+2. El `AuthServiceImpl` pide al `UserDetailsServiceImpl` que cargue los detalles del usuario asociados a ese email desde el `CredentialRepository`.
+
+3. Una vez que se obtienen los detalles del usuario (UserDetails), el `AuthServiceImpl` utiliza el `BCryptPasswordEncoder` para verificar si la contraseña proporcionada por el usuario coincide con la contraseña codificada almacenada.
+
+4. Si las credenciales son válidas, el AuthServiceImpl crea un objeto `Authentication` y lo establece en el `SecurityContextHolder`, marcando al usuario como autenticado para el resto de la solicitud.
+
+5. Finalmente, se genera un JWT, que puede ser utilizado para mantener la sesión del usuario en futuras solicitudes sin necesidad de volver a enviar las credenciales.
+   
+```
+@Configuration
+public class PasswordEncoderConfig {
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+```
+
+> [!NOTE]
+> Es importante hacer la configuración del `Password Encoder` dentro de la aplicación, estó para asegurarse de hacer un hashing sobre las contraseñas de los ususarios antes de su resguardo en una base de datos.
 
 <a id="auhtentication-manager-y-provider"></a>
 ### AuthenticationManager y AuthenticationProvider
