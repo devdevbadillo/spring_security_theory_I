@@ -52,7 +52,7 @@
       - [Expresiones de seguridad](#expresiones-de-seguridad)
         - [Las expresiones hasRole(), hasAuthority(), isAuthenticated(), isAnonymous(), isFullyAuthenticated(), permitAll(), denyAll()](#expresiones-de-seguridad-para-autorizacion)
       - [Autorización basada en métodos](#autorizacion-basada-en-metodos)
-        - [Las anotaciones @PreAuthorize, @PostAuthorize, @Secured, @RolesAllowed](#anotaciones-para-autorizacion)
+        - [Las anotaciones @PreAuthorize, @PostAuthorize, @Secured](#anotaciones-para-autorizacion)
     - [CSRF Protection (Cross-Site Request Forgery)](#crsf-protection)
         - [Implementación por defecto](#implementacion-contra-crsf-por-defecto)
         - [Manejo en APIs REST](#manejo-de-crsf-en-apis)
@@ -942,33 +942,206 @@ Para que el acceso sea concedido, **todos los AccessDecisionVoters que no se abs
 
 <a id="configuracion-de-spring-security"></a>
 ## Configuración de Spring Security
+Desde **Spring Security 3.2**, la configuración basada en Java se ha convertido en la forma preferida y más idiomática de configurar la seguridad en tus aplicaciones. Permite una mayor flexibilidad, legibilidad y reutilización de código en comparación con la configuración basada en XML
 
 <a id="configuracion-basada-en-java"></a>
 ### Configuración basada en Java
+La configuración basada en Java se basa en definir beans de configuración que extienden o usan la funcionalidad de Spring Security.
 
 <a id="la-anotacion-enable-web-security"></a>
 #### La anotación @EnableWebSecurity
+***Esta anotación es el punto de partida para la configuración de seguridad basada en Java en Spring MVC**. Cuando se coloca sobre una clase de configuración (una clase anotada con @Configuration), **le indica a Spring que debe importar las configuraciones de Spring Security y habilitar sus características de seguridad**. 
+
+> [!IMPOTANT]
+>
+> Internamente, `@EnableWebSecurity` importa la clase `WebSecurityConfiguration`, que es la que realmente configura el filtro de Spring Security `(FilterChainProxy)` para la aplicación web/API REST.
+
+- Ejemplo
+```
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+}
+```
 
 <a id="configuracion-para-autorizacion"></a>
 ### Configuración para autorización
+La autorización es el proceso de determinar si un usuario autenticado tiene permiso para acceder a un recurso o realizar una acción específica. En Spring Security, la autorización se puede configurar a nivel de URL (o ruta) y también a nivel de método.
 
 <a id="autorizacion-basada-en-url"></a>
 #### Autorización basada en URL
+La autorización basada en URL es la forma más común de controlar el acceso a diferentes recursos. Permite especificar qué roles o autoridades se requieren para acceder a ciertas rutas basándose en las reglas de autorización.
 
 <a id="los-metodos-para-autorizacion-por-url"></a>
 ##### Los métodos .antMatchers(), .mvcMatchers(), .requestMatchers()
+Estos métodos son fundamentales para definir patrones de URL y aplicarles reglas de seguridad. Se utilizan dentro de la configuración de Spring Security, típicamente dentro del método `configure(HttpSecurity http)`.
+
+1. `http.antMatchers()`: Es el más antiguo y utiliza patrones de estilo Ant. Un patrón Ant puede incluir:
+  * `?`: coincide con un carácter único.
+  * `*`: coincide con cero o más caracteres dentro de un segmento de ruta.
+  * `**`: coincide con cero o más segmentos de ruta.
+
+- Ejemplo
+```
+http.antMatchers("/admin/**").hasRole("ADMIN") // Todas las URLs bajo /admin/
+http.antMatchers("/user/*").hasAnyRole("USER", "ADMIN") // URLs como /user/profile, pero no /user/profile/edit
+```
+
+2. `http.mvcMatchers()`: Introducido en Spring Framework 4.1 y Spring Security 4.0, es más inteligente que `antMatchers()` porque **entiende los patrones de URL definidos por Spring MVC** (como `@RequestMapping`). Es más preciso y robusto, ya que utiliza el HandlerMapping de Spring MVC para la coincidencia.
+
+- Ejemplo
+```
+http.mvcMatchers("/products/{id}").permitAll() // Coincide exactamente con la forma en que MVC mapea 
+```  
+
+3. `http.requestMatchers()`: Es la forma recomendada en versiones más recientes de Spring Security. Permite usar PathRequest para recursos estáticos (CSS, JS, imágenes), patrones Ant (AntPathRequestMatcher) o patrones de Spring MVC (MvcRequestMatcher).
+```
+http.requestMatchers("/public/**").permitAll();
+http.requestMatchers(PathRequest.toStaticResources().atCommonLocations()).permitAll(); // Para recursos estáticos
+http.requestMathcers(HttpMethod.POST, "/api/v1/register").permitAll();
+```
+
+> [!IMPORTANT]
+> Spring Security procesa las reglas en el orden en que las declaras. Por lo tanto, las reglas más específicas deben ir antes que las más generales.
 
 <a id="expresiones-de-seguridad"></a>
 #### Expresiones de seguridad
+Las expresiones de seguridad son un lenguaje potente y flexible que Spring Security utiliza para definir reglas de autorización. Permiten construir condiciones complejas basadas en el rol del usuario, sus autoridades, si está autenticado, etc.
 
 <a id="expresiones-de-seguridad-para-autorizacion"></a>
 ##### Las expresiones hasRole(), hasAuthority(), isAuthenticated(), isAnonymous(), isFullyAuthenticated(), permitAll(), denyAll()
 
+1. `hasRole(String role)`: Retorna `true` si el usuario autenticado tiene el **rol* especificado. Por convención, Spring Security automáticamente añade el prefijo `"ROLE_"` a los roles cuando se usa hasRole(). Por ejemplo, hasRole("ADMIN") busca la autoridad `"ROLE_ADMIN"`.
+
+- Ejemplo
+```
+http.requestMatchers(HttpMethod.GET, CommonConstants.PRIVATE_URL + "/**").hasRole("ADMIN");
+```
+
+2. `hasAuthority(String authority)`: Retorna `true` si el usuario autenticado tiene la autoridad **(permiso)** específica. A diferencia de hasRole(), hasAuthority() no añade ningún prefijo. Es más flexible y se usa cuando necesitas un control más granular que los roles simples.
+
+- Ejemplo
+```
+http.requestMatchers(HttpMehthod.DELETE, "/api/product/delete").hasAuthority("DELETE_PRODUCT_PERMISSION")
+```
+
+3. `isAuthenticated()`: Retorna `true` si el usuario actual ha sido autenticado, incluso si ha sido por "recordarme" (remember-me) o autenticación anónima (si está habilitada).
+
+- Ejemplo
+```
+http.requestMatchers(HttpMethod.GET, "/dashboard").isAuthenticated()
+```
+
+4. `isAnonymous()`: Retorna `true` si el usuario actual es un usuario anónimo (no ha iniciado sesión).
+
+- Ejemplo
+```
+http.requestMatchers(HttpMethod.POST, "/login").isAnonymous()
+```
+
+5. `isFullyAuthenticated()`: Retorna true si el usuario actual ha sido autenticado completamente (no a través de "recordarme" o anónimo). Esto es útil para acciones de alta seguridad donde se quiere asegurar que el usuario haya ingresado sus credenciales recientemente.
+
+- Ejemplo
+```
+http.requestMatchers(HttpMethod.PATCH, "/settings/change-password").isFullyAuthenticated()
+```
+
+6. `permitAll()`: Permite el acceso a cualquier usuario, sin importar si está autenticado o qué roles/autoridades tiene.
+
+- Ejemplo
+```
+http.requestMatchers(HttpMethod.POST, "/login").permitAll()
+```
+
+7. `denyAll()`: Deniega el acceso a todos los usuarios, incluso si están autenticados y tienen los roles correctos. Es útil para deshabilitar temporalmente ciertas partes de la aplicación.
+
+- Ejemplo
+```
+.antMatchers("/maintenance").denyAll()
+```
+
 <a id="autorizacion-basada-en-metodos"></a>
 #### Autorización basada en métodos
+Mientras que la autorización basada en URL controla el acceso a rutas completas dentro de una aplicación/API REST, la autorización basada en métodos te **permite aplicar reglas de seguridad a métodos individuales dentro de tus clases de servicio o controladores**. Esto es increíblemente útil cuando **diferentes usuarios pueden acceder a la misma URL, pero solo algunos tienen permiso para ejecutar ciertas operaciones o acceder a datos específicos devueltos por un método**.
+
+Para habilitar la seguridad basada en anotaciones en tus métodos, necesitas añadir `@EnableMethodSecurity`:
+```
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity 
+public class SecurityConfig {
+    // ... 
+}
+```
 
 <a id="anotaciones-para-autorizacion"></a>
-##### Las anotaciones @PreAuthorize, @PostAuthorize, @Secured, @RolesAllowed
+##### Las anotaciones @PreAuthorize, @PostAuthorize, @Secured
+
+> @PreAuthorize
+
+PreAuthorize **se evalúa antes de que el método anotado se ejecute**. Utiliza expresiones de seguridad de `Spring Expression Language (SpEL)`, por lo que permite crear condiciones de autorización muy complejas.
+
+- Ejemplos:
+  
+1. Verificar roles:
+```
+  @PreAuthorize("hasRole('ADMIN')")
+  public String deleteUser(Long userId) { ... }
+```
+
+2. Verificar autoridades:
+```
+@PreAuthorize("hasAuthority('USER_DELETE_PERMISSION')")
+public String deleteUser(Long userId) { ... }
+```
+
+3. Combinar roles y autoridades:
+```
+@PreAuthorize("hasAnyRole('ADMIN', 'MANAGER') or hasAuthority('CREATE_REPORT')")
+public Report generateReport(ReportCriteria criteria) { ... }
+```
+
+4. Acceder a parámetros del método:
+```
+@PreAuthorize("#userId == authentication.principal.id")
+public UserProfile getUserProfile(Long userId) {
+    // Solo el usuario con el ID especificado puede acceder a este perfil
+    ...
+}
+```
+
+> @PostAuthorize
+
+PostAuthorize se evalúa después de que el método anotado se ha ejecutado y **tiene acceso al valor de retorno del método**. 
+¿Cuándo utilizarlo? Cuando la decisión de autorización depende del resultado de la operación del método. Por ejemplo, para asegurarse de que un usuario solo pueda ver documentos si es el propietario, una vez que el documento ha sido recuperado de la base de datos.
+
+- Ejemplo:
+```
+@PostAuthorize("returnObject.ownerId == authentication.principal.id")
+public Document getDocumentById(Long documentId) {
+    Document doc = documentService.findById(documentId);
+    return doc; // La expresión se evalúa sobre este 'doc'
+}
+```
+> [!IMPORTANT]
+> El uso de `@PostAuthorize` puede ser delicado porque el método ya se ejecutó. Si la autorización falla, es posible que ya se haya realizado alguna acción (como una eliminación), aunque Spring Security arrojará una excepción `AccessDeniedException`.
+
+
+> @Secured
+
+Esta es una anotación más simple y la forma original de realizar autorización basada en métodos en Spring Security. **Solo permite especificar una lista de roles (o autoridades) que se requieren para acceder al método**.
+
+- Ejemplos
+```
+@Secured("ROLE_ADMIN") // Requiere el prefijo "ROLE_" explícitamente por defecto
+public void deleteProduct(Long productId) { ... }
+
+@Secured({"ROLE_USER", "ROLE_ADMIN"})
+public List<Order> getUserOrders(Long userId) { ... }
+```
+
+- No soporta expresiones SpEL
 
 <a id="crsf-protection"></a>
 ### CSRF Protection (Cross-Site Request Forgery)
