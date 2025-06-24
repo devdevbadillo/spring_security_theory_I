@@ -53,18 +53,15 @@
         - [Las expresiones hasRole(), hasAuthority(), isAuthenticated(), isAnonymous(), isFullyAuthenticated(), permitAll(), denyAll()](#expresiones-de-seguridad-para-autorizacion)
       - [Autorización basada en métodos](#autorizacion-basada-en-metodos)
         - [Las anotaciones @PreAuthorize, @PostAuthorize, @Secured](#anotaciones-para-autorizacion)
-    - [CSRF Protection (Cross-Site Request Forgery)](#crsf-protection)
-        - [Implementación por defecto](#implementacion-contra-crsf-por-defecto)
-        - [Manejo en APIs REST](#manejo-de-crsf-en-apis)
     - [Session Management](#session-management)
       - [Estrategias de creación de sesión](#creacion-de-sesiones)
-        - [Las estrategias always, if_required, never, stateless](#estrategias-para-la-creacion-de-sesiones)
+        - [Las estrategias always, if_required, stateless](#estrategias-para-la-creacion-de-sesiones)
       - [Control de concurrencia de sesiones](#concurrencia-de-sesiones)
       - [Invalidación de sesiones](#invalidacion-de-sesiones)
       - [Protección contra fijación de sesión](#proteccion-contra-fijacion-de-sesion)
     - [CORS (Cross-Origin Resource Sharing)](#cors)
       - [Configuración dentro de Spring Security](#configuracion-de-cors)
-
+          
 <a id="fundamentos-de-seguridad-en-aplicaciones"></a>
 ## Fundamentos de seguridad en aplicaciones web 
 La seguridad en aplicaciones web se refiere a las medidas y prácticas implementadas para proteger las aplicaciones basadas en la web de amenazas que puedan comprometer su funcionamiento, la confidencialidad de los datos, la integridad de la información y la disponibilidad de los servicios.
@@ -1143,40 +1140,257 @@ public List<Order> getUserOrders(Long userId) { ... }
 
 - No soporta expresiones SpEL
 
-<a id="crsf-protection"></a>
-### CSRF Protection (Cross-Site Request Forgery)
-
-<a id="implementacion-contra-crsf-por-defecto"></a>
-#### Implementación por defecto
-
-<a id="manejo-de-crsf-en-apis"></a>
-#### Manejo en APIs REST
-
 <a id="session-management"></a>
 ### Session Management
+La Gestión de sesiones en Spring Security se refiere a cómo la aplicación maneja el estado de autenticación de un usuario entre múltiples solicitudes HTTP
+
+En el contexto de Spring Security, la gestión de sesiones se ocupa de:
+
+1. Crear y mantener sesiones para usuarios autenticados.
+2. Controlar cómo se crean estas sesiones.
+3. Gestionar la concurrencia, es decir, cuántas sesiones puede tener un usuario al mismo tiempo.
+4. Invalidar sesiones de forma segura cuando un usuario cierra sesión o por inactividad.
 
 <a id="creacion-de-sesiones"></a>
 #### Estrategias de creación de sesión
+Las estrategias de creación de sesión (Session Creation Strategies) determinan cuándo y cómo Spring Security creará una sesión HTTP para un usuario. 
+
+Se configuran típicamente en el `SecurityFilterChain` usando el método `sessionManagement()`
+```
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .sessionManagement(session -> session
+                .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED) // Definición de la estrategia
+            )
+            // ...
+            .build();
+    }
+}
+```
 
 <a id="estrategias-para-la-creacion-de-sesiones"></a>
-##### Las estrategias always, if_required, never, stateless
+##### Las estrategias always, if_required, stateless
+Spring Security proporciona tres estrategias principales de creación de sesión, representadas por la enumeración `SessionCreationPolicy`.
+
+1. `SessionCreationPolicy.ALWAYS`
+
+**Siempre se creará una sesión HTTP** si no existe una para la solicitud actual. Esto puede llevar a un mayor consumo de memoria en el servidor, ya que se crean sesiones incluso para usuarios no autenticados 
+
+- `Caso de uso`: Aplicaciones web tradicionales que usan mucho la sesión para carrito de compras, mensajes flash, etc.
+
+2. `SessionCreationPolicy.IF_REQUIRED`
+Se creará una sesión HTTP **solo si es necesaria para la seguridad** (es decir, para almacenar el SecurityContext) o si la aplicación web lo requiere explícitamente (ej., llamando a request.getSession()). **Esta es la estrategia por defecto en Spring Security**.
+
+> [!NOTE]
+> 
+> Si la aplicación no usa sesiones para nada más que el `SecurityContext`, podría ser más eficiente usar NEVER o STATELESS.
+
+3. `SessionCreationPolicy.STATELESS`
+**La aplicación nunca creará una sesión HTTP** y nunca la usará para almacenar o recuperar el SecurityContext. Cada solicitud debe contener sus propias credenciales para autenticación.
+
+- `Caso de uso`: Para APIs RESTful que utilizan autenticación basada en tokens (JWT, OAuth2 Bearer Tokens), donde el estado de autenticación no se mantiene en el servidor entre solicitudes
+
+> [!IMPORTANT]
+> La protección CSRF (que también depende de la sesión) se desactiva automáticamente cuando se usa esta estrategia.
+
 
 <a id="concurrencia-de-sesiones"></a>
 #### Control de concurrencia de sesiones
+El control de concurrencia de sesiones se refiere a la capacidad de Spring Security para limitar el número de sesiones simultáneas que un único usuario puede tener activas.
+
+> Configuración en Spring Boot (con @EnableWebSecurity)
+```
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.core.session.SessionRegistry;
+import org.springframework.security.core.session.SessionRegistryImpl;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.session.HttpSessionEventPublisher;
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SessionRegistry sessionRegistry() {
+        return new SessionRegistryImpl();
+    }
+
+    // Necesario para que Spring Security reciba eventos de sesión del contenedor web
+    @Bean
+    public HttpSessionEventPublisher httpSessionEventPublisher() {
+        return new HttpSessionEventPublisher();
+    }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .sessionManagement(session -> session
+                .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
+                .maximumSessions(1)
+                .maxSessionsPreventsLogin(true) 
+                // .maxSessionsPreventsLogin(false) 
+                .expiredUrl("/login?expired") 
+                .sessionRegistry(sessionRegistry())
+            )
+            // ...
+            .build();
+    }
+}
+```
+
+Explicación de los métodos clave:
+
+- `maximumSessions(int maxSessions)`: Establece el número máximo de sesiones concurrentes permitidas para un usuario. Si lo estableces en 1, un usuario solo puede tener una sesión activa a la vez.
+
+- `maxSessionsPreventsLogin(boolean maxSessionsPreventsLogin)`:
+
+1. Si es true (por defecto): Cuando un usuario intenta iniciar sesión y ya tiene el número máximo de sesiones activas, el nuevo intento de inicio de sesión es denegado. El usuario no puede iniciar sesión hasta que una de sus sesiones existentes expire o sea invalidada.
+
+2. Si es false: Cuando un usuario intenta iniciar sesión y ya tiene el número máximo de sesiones activas, la sesión más antigua existente es invalidada. El usuario podrá iniciar sesión con la nueva sesión, y la sesión anterior será automáticamente terminada. Esta es la opción más común para "un usuario, una sesión".
+
+- `expiredUrl(String expiredUrl)`: La URL a la que se redirige al usuario si su sesión es invalidada debido a la concurrencia (maxSessionsPreventsLogin(false)).
+
+- `sessionRegistry(SessionRegistry sessionRegistry)`: Inyecta la implementación del SessionRegistry que Spring Security usará para rastrear las sesiones activas. **SessionRegistryImpl** es la implementación por defecto en memoria.
+
 
 <a id="invalidacion-de-sesiones"></a>
 #### Invalidación de sesiones
+La invalidación de sesiones es el proceso de terminar una sesión HTTP activa, lo que significa que el SecurityContext asociado y cualquier otro dato de sesión se eliminan del servidor, y la cookie de sesión del usuario deja de ser válida.
+
+> Formas comunes de invalidación de sesiones
+
+1. Cierre de sesión explícito (Logout)
+
+- Cuando un usuario hace clic en un botón de "Cerrar Sesión", Spring Security intercepta esta solicitud (por defecto, a /logout). El LogoutFilter se encarga de invalidar la sesión HTTP, limpiar el SecurityContextHolder y eliminar cualquier cookie de "recordarme".
+
+Configuración: 
+```
+http
+    .logout(logout -> logout
+        .logoutUrl("/logout")
+        .logoutSuccessUrl("/login?logout") 
+        .invalidateHttpSession(true) 
+        .deleteCookies("JSESSIONID")
+    );
+```
+
+2. Expiración por inactividad (Timeout)
+
+- Las sesiones HTTP tienen un tiempo máximo de inactividad. Si el usuario no realiza ninguna solicitud dentro de ese período, el servidor web (Tomcat, Jetty, etc.) invalidará automáticamente la sesión.
+
+Configuración:
+
+```
+# application.properties
+
+server.servlet.session.timeout=30m # 30 minutos de inactividad
+```
 
 <a id="proteccion-contra-fijacion-de-sesion"></a>
 #### Protección contra fijación de sesión
+La fijación de sesión (Session Fixation) es un tipo de ataque en el que un atacante **manipula el ID de sesión de un usuario, forzándolo a usar un ID de sesión predecido o proporcionado por el atacante**.
 
+- Escenario del ataque
+
+1. Un atacante visita tu sitio web, obteniendo un ID de sesión válido del servidor (ej. JSESSIONID=ABC).
+2. El atacante envía un enlace malicioso al usuario, que incluye este ID de sesión (http://tudominio.com/?JSESSIONID=ABC).
+3. El usuario hace clic en el enlace y, sin saberlo, comienza a navegar por el sitio usando el ID de sesión ABC.
+4. El usuario se autentica (inicia sesión) con éxito.
+5. El atacante, que todavía tiene el ID de sesión ABC, ahora tiene acceso a la sesión autenticada del usuario.
+
+> Protección de Spring Security
+```
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .sessionManagement(session -> session
+                .sessionFixation()
+                    .migrateSession()
+            )
+            // ... 
+            .build();
+    }
+}
+```
+
+1. `migrateSession()` (Por defecto en Spring Security 3.1+): Cuando un usuario no autenticado accede con un ID de sesión y luego se autentica, Spring Security crea una nueva sesión y copia todos los atributos de la sesión antigua a la nueva. El ID de sesión antiguo se invalida.
+
+2. `changeSessionId()` (Novedad en Spring Security 5.x):  A partir de Servlet 3.1, los contenedores web tienen un método HttpServletRequest.changeSessionId() que cambia el ID de sesión sin crear una nueva sesión. Spring Security utiliza esta funcionalidad por defecto si está disponible, ya que es más eficiente. Si no está disponible (ej., en contenedores más antiguos), vuelve a la estrategia `migrateSession()`.
+
+   
 <a id="cors"></a>
 ### CORS (Cross-Origin Resource Sharing)
+CORS (Cross-Origin Resource Sharing), es un mecanismo de seguridad implementado en los navegadores web que **controla cómo las solicitudes web de un origen (dominio, protocolo o puerto) pueden interactuar con recursos de otro origen**. No es una característica para prevenir ataques al servidor, sino para proteger a los usuarios finales de aplicaciones web maliciosas que intenten realizar solicitudes no autorizadas desde un dominio diferente.
 
 <a id="configuracion-de-cors"></a>
 #### Configuración dentro de Spring Security
 
+Para configurar CORS globalmente en Spring Security, se puede usar el método `cors()` dentro del `SecurityFilterChain` y proporcionarle una implementación de `CorsConfigurationSource`.
+```
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.Arrays;
+import java.util.List;
 
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
 
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http(
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+        );
+
+        return http.build();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+
+        // Permite solicitudes desde estos orígenes específicos
+        configuration.setAllowedOrigins(List.of("http://localhost:3000", "http://another-domain.com"));
+
+        // Permite estos métodos HTTP (GET, POST, PUT, DELETE, etc.)
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"));
+
+        // Permite estos encabezados HTTP en las solicitudes
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Cache-Control", "Content-Type", "X-Requested-With"));
+
+        // Permite el envío de credenciales (cookies, encabezados de autorización)
+        configuration.setAllowCredentials(true);
+
+        // Define la duración máxima que los resultados de la preflight request pueden ser almacenados en caché por el navegador
+        configuration.setMaxAge(3600L); // 1 hora
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+
+        // Aplica esta configuración CORS a todas las rutas (/**)
+        source.registerCorsConfiguration("/**", configuration);
+
+        return source;
+    }
+}
+```
 
